@@ -1,0 +1,7 @@
+[
+  {
+    "name": "Check Weather",
+    "description": "Checks the weather in a city",
+    "action": "https://api.weather.com/v1/get"
+  }
+]
