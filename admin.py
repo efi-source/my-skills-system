@@ -3,102 +3,134 @@ import requests
 import pandas as pd
 from datetime import datetime
 
-# --- הגדרות קישורים - חובה לעדכן את הקישורים שלך ---
-PIPEDREAM_URL = "כאן_הלינק_של_ה-ENDPOINT_מ-PIPEDREAM"
-GITHUB_USER = "efi-source" # שם המשתמש שלך
-GITHUB_REPO = "my-skills-system" # שם הריפוזיטורי
-SKILLS_FILE = "skills.json"
-HISTORY_FILE = "history.json"
+# --- הגדרות מערכת ---
+PIPEDREAM_URL = "https://eoz6msqotx1bbg9.m.pipedream.net/"
+GITHUB_USER = "efi-source"
+GITHUB_REPO = "my-skills-system"
+RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main"
 
-# יצירת קישורי RAW לקריאה מגיטהאב
-RAW_SKILLS_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/{SKILLS_FILE}"
-RAW_HISTORY_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/{HISTORY_FILE}"
-
-# --- עיצוב דף האדמין ---
-st.set_page_config(page_title="AI Autonomous Admin", layout="wide")
+# --- עיצוב ממשק רגוע ויוקרתי ---
+st.set_page_config(page_title="AI Management Console", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; color: #e0e0e0; }
-    .skill-card { background: #161b22; padding: 15px; border-radius: 10px; border: 1px solid #30363d; margin-bottom: 10px; }
-    .history-card { background: #1c2128; padding: 15px; border-radius: 8px; border-right: 4px solid #58a6ff; margin-bottom: 12px; }
-    .user-text { color: #8b949e; font-size: 0.9em; }
-    .ai-text { color: #58a6ff; font-weight: bold; }
+    /* רקע כללי ופונטים */
+    .stApp { background-color: #f8fafc; color: #1e293b; }
+    
+    /* כרטיסי סקילים */
+    .skill-card { 
+        background: white; 
+        padding: 20px; 
+        border-radius: 12px; 
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        border: 1px solid #e2e8f0;
+        margin-bottom: 15px;
+        transition: transform 0.2s;
+    }
+    .skill-card:hover { transform: translateY(-3px); }
+    
+    /* בועות היסטוריה */
+    .history-item {
+        background: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 4px solid #3b82f6;
+        margin-bottom: 10px;
+        box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+    }
+    .timestamp { color: #64748b; font-size: 0.8em; }
+    .user-msg { color: #1e293b; font-weight: 600; margin-bottom: 5px; }
+    .ai-res { color: #334155; background: #f1f5f9; padding: 10px; border-radius: 5px; font-family: monospace; }
+    
+    /* כפתורים */
+    .stButton>button {
+        border-radius: 8px;
+        background-color: #3b82f6;
+        color: white;
+        border: none;
+        transition: 0.3s;
+    }
+    .stButton>button:hover { background-color: #2563eb; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🧠 AI Autonomous System - Command Center")
-
 # --- פונקציות עזר ---
-def get_data(url):
+def fetch_json(file_name):
     try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
+        r = requests.get(f"{RAW_BASE}/{file_name}")
+        return r.json() if r.status_code == 200 else []
     except:
         return []
-    return []
 
-# --- חלק 1: סקילים פעילים (ניהול וביצוע) ---
-st.subheader("🛠️ סקילים במערכת (משיכה מ-GitHub)")
-skills = get_data(RAW_SKILLS_URL)
+# --- תפריט צד ---
+with st.sidebar:
+    st.title("⚙️ הגדרות")
+    st.info("המערכת מחוברת ל-GitHub ומסנכרנת נתונים בזמן אמת.")
+    if st.button("רענן נתונים"):
+        st.rerun()
+
+# --- גוף העמוד ---
+st.title("🛡️ AI Command Center")
+st.caption("ניהול סקילים, תיקון באגים ומעקב אחר פעולות הסוכן")
+
+# --- חלק 1: סקילים פעילים ---
+st.subheader("🛠️ סקילים זמינים")
+skills = fetch_json("skills.json")
 
 if skills:
     cols = st.columns(3)
     for i, skill in enumerate(skills):
         with cols[i % 3]:
-            st.markdown(f"""<div class="skill-card">
-                <b>{skill.get('name', 'Unknown Skill')}</b><br>
-                <small>{skill.get('description', 'No description')}</small>
-            </div>""", unsafe_allow_html=True)
-            if st.button(f"הפעל: {skill.get('name')}", key=f"run_{i}"):
-                with st.spinner("מריץ סקיל..."):
-                    res = requests.post(PIPEDREAM_URL, json={"message": f"Run skill: {skill.get('name')}"})
-                    st.write(res.text)
-else:
-    st.info("לא נמצאו סקילים ב-GitHub. בקש מה-AI ליצור אחד!")
+            st.markdown(f"""
+            <div class="skill-card">
+                <div style="font-size: 1.2em; font-weight: bold;">{skill.get('name', 'סקיל ללא שם')}</div>
+                <div style="color: #64748b; font-size: 0.9em; margin-bottom: 10px;">{skill.get('description', 'אין תיאור זמין')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button(f"הפעל את {skill.get('name')}", key=f"btn_{i}"):
+                with st.spinner("מבצע פקודה..."):
+                    res = requests.post(PIPEDREAM_URL, json={"message": f"Execute skill: {skill.get('name')}"})
+                    st.toast(f"תגובה: {res.text[:50]}...")
 
 st.divider()
 
-# --- חלק 2: ממשק פקודות (הזנה) ---
-st.subheader("🤖 שלח פקודה ל-AI (תיקון באגים / הוספת קוד)")
-col_input, col_btn = st.columns([4, 1])
+# --- חלק 2: שליחת פקודות פיתוח ---
+st.subheader("🤖 מרכז פיתוח ותיקון")
+col_text, col_btn = st.columns([4, 1])
 
-with col_input:
-    user_query = st.text_input("הזן פקודה חדשה:", placeholder="למשל: תתקן את הבאג בסקיל המזג אוויר ותעדכן בגיטהאב")
+with col_text:
+    user_input = st.text_input("הנחיות לסוכן (למשל: 'תקן את הבאג בנתיב ה-API')", key="main_input")
 
 with col_btn:
-    st.write("##") # ריוח
-    if st.button("שגר פקודה", use_container_width=True):
-        if user_query:
-            with st.spinner("הסוכן מעבד ומעדכן מערכות..."):
+    st.write("##")
+    if st.button("שלח פקודה", use_container_width=True):
+        if user_input:
+            with st.spinner("הסוכן מעדכן את המערכת..."):
                 try:
-                    response = requests.post(PIPEDREAM_URL, json={"message": user_query})
-                    st.success("הפקודה נשלחה בהצלחה!")
-                    st.rerun() # רענון כדי לראות את ההיסטוריה מתעדכנת
-                except Exception as e:
-                    st.error(f"שגיאה בחיבור ל-Pipedream: {e}")
+                    requests.post(PIPEDREAM_URL, json={"message": user_input})
+                    st.success("הפקודה נשלחה! המתן לעדכון בגיטהאב.")
+                    st.rerun()
+                except:
+                    st.error("שגיאה בחיבור לשרת.")
 
 st.divider()
 
-# --- חלק 3: היסטוריית מערכת (הזיכרון של ה-AI) ---
-st.subheader("📜 לוג פעולות וזיכרון (מהשרת)")
-history = get_data(RAW_HISTORY_URL)
+# --- חלק 3: היסטוריית פעולות (הזיכרון) ---
+st.subheader("📜 יומן פעולות המערכת")
+history = fetch_json("history.json")
 
 if history:
-    # אם ההיסטוריה היא אובייקט בודד (כי Pipedream דרס), נהפוך אותה לרשימה
+    # טיפול במקרה שהקובץ אינו רשימה
     if not isinstance(history, list):
         history = [history]
         
-    for entry in reversed(history):
+    for item in reversed(history):
         st.markdown(f"""
-        <div class="history-card">
-            <div class="user-text">🕒 {entry.get('timestamp', 'N/A')} | <b>בקשתך:</b> {entry.get('user', 'Empty')}</div>
-            <div class="ai-text">🤖 תשובת AI/ביצוע:</div>
-            <div style="font-family: monospace; font-size: 0.85em; background: #0d1117; padding: 10px; margin-top: 5px;">
-                {entry.get('ai', 'No data')}
-            </div>
+        <div class="history-item">
+            <div class="timestamp">🕒 {item.get('timestamp', 'זמן לא ידוע')}</div>
+            <div class="user-msg">👤 פקודה: {item.get('user', '-')}</div>
+            <div class="ai-res">🤖 {item.get('ai', 'מבצע עדכון...')}</div>
         </div>
         """, unsafe_allow_html=True)
 else:
-    st.write("היסטוריית השרת ריקה כרגע.")
+    st.write("היסטוריית הפעולות ריקה.")
