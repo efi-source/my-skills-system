@@ -1,0 +1,16 @@
+name: Run My Skills
+on:
+  workflow_dispatch: # זה מאפשר לך להפעיל את הסקיל בלחיצת כפתור ידנית
+
+jobs:
+  execute-skill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Show my skills list
+        run: |
+          echo "Connecting to your skills site..."
+          cat skills.json
+          echo "Successfully loaded all skills!"
