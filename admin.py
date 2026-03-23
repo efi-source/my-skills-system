@@ -4,9 +4,15 @@ import json
 import base64
 from datetime import datetime
 
-# --- הגדרות מערכת (המפתחות המעודכנים שלך) ---
-GEMINI_API_KEY = "AIzaSyDbGtzd4_Q6Vd346hh84A81ugtHGaWHHYo"
-GITHUB_TOKEN = "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"
+# --- משיכת מפתחות מאובטחת מה-Secrets של Streamlit ---
+# GitHub לא יראה את המפתחות כאן ולכן לא יבטל אותם!
+try:
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
+    GEMINI_API_KEY = st.secrets["GEMINI_KEY"]
+except Exception as e:
+    st.error("שגיאה: המפתחות לא נמצאו ב-Secrets. וודא שהגדרת אותם ב-Streamlit Cloud.")
+    st.stop()
+
 GITHUB_USER = "efi-source"
 GITHUB_REPO = "my-skills-system"
 
@@ -19,24 +25,17 @@ st.set_page_config(page_title="AI Master Control", layout="wide")
 st.markdown("""
 <style>
     .stApp { background-color: #f8fafc; }
-    .main-title { color: #1e293b; text-align: center; font-weight: 800; margin-bottom: 20px; }
-    .skill-card { 
-        background: white; padding: 15px; border-radius: 12px; 
-        border: 1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        margin-bottom: 15px; text-align: center;
-    }
+    .main-title { color: #1e293b; text-align: center; font-weight: 800; }
     .chat-bubble {
         background: white; padding: 20px; border-radius: 15px;
         border-right: 6px solid #3b82f6; margin-bottom: 20px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }
-    .user-label { color: #64748b; font-size: 0.8rem; font-weight: bold; }
-    .ai-response { color: #1e293b; background: #f1f5f9; padding: 10px; border-radius: 8px; margin-top: 5px; }
+    .ai-response { color: #1e293b; background: #f1f5f9; padding: 10px; border-radius: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- פונקציות תקשורת ---
-
 def github_action(path, method="GET", data=None, sha=None):
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     url = f"{REPO_API}/{path}"
@@ -49,7 +48,7 @@ def github_action(path, method="GET", data=None, sha=None):
             return [], None
         elif method == "PUT":
             payload = {
-                "message": "System Sync",
+                "message": "System Sync via Secrets",
                 "content": base64.b64encode(json.dumps(data, indent=4).encode('utf-8')).decode('utf-8'),
                 "sha": sha
             }
@@ -59,66 +58,55 @@ def github_action(path, method="GET", data=None, sha=None):
 
 def ask_gemini(prompt):
     try:
-        payload = {"contents": [{"parts": [{"text": f"ענה בעברית קצרה ומקצועית: {prompt}"}]}]}
+        payload = {"contents": [{"parts": [{"text": f"ענה בעברית: {prompt}"}]}]}
         r = requests.post(GEMINI_URL, json=payload, timeout=10)
         return r.json()['candidates'][0]['content']['parts'][0]['text']
     except: return "שגיאה בתקשורת עם ה-AI"
 
 # --- גוף האפליקציה ---
-
-st.markdown('<h1 class="main-title">🧠 AI Autonomous Command Center</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-title">🧠 AI Autonomous Admin</h1>', unsafe_allow_html=True)
 
 # כפתור בדיקה בסידבר
 with st.sidebar:
-    st.header("⚙️ הגדרות")
-    if st.button("🔄 רענן מערכת"):
-        st.rerun()
-    if st.button("🔍 בדיקת חיבור"):
+    if st.button("🔍 בדיקת חיבור סופית"):
         _, sha = github_action("history.json")
-        if sha: st.success("מחובר לגיטהאב!")
-        else: st.error("שגיאת חיבור - בדוק את הטוקן")
+        if sha: st.success("המערכת מחוברת ומאובטחת! ✅")
+        else: st.error("חיבור נכשל. בדוק את ה-Secrets.")
 
-# תצוגת סקילים
-st.subheader("🛠️ סקילים פעילים")
+# הצגת סקילים
+st.subheader("🛠️ סקילים")
 skills, _ = github_action("skills.json")
 if skills:
     cols = st.columns(3)
     for i, s in enumerate(skills):
         with cols[i % 3]:
-            st.markdown(f'<div class="skill-card"><b>{s.get("name")}</b><br><small>{s.get("description")}</small></div>', unsafe_allow_html=True)
+            st.info(f"**{s.get('name')}**")
 
 st.divider()
 
-# מרכז פקודות
-st.subheader("🤖 מרכז פקודות וניהול")
-col_input, col_send = st.columns([4, 1])
-with col_input:
-    user_cmd = st.text_input("הזן פקודה חדשה:", placeholder="למשל: תזכור ששמי אפי", key="input")
-with col_send:
-    st.write("##")
-    if st.button("שגר פקודה", type="primary", use_container_width=True):
-        if user_cmd:
-            with st.spinner("מעבד ושומר..."):
-                answer = ask_gemini(user_cmd)
-                hist, sha = github_action("history.json")
-                hist.append({"time": datetime.now().strftime("%H:%M"), "user": user_cmd, "ai": answer})
-                if github_action("history.json", "PUT", hist, sha):
-                    st.success("נשמר בזיכרון!")
-                    st.rerun()
+# צ'אט
+st.subheader("🤖 שלח פקודה")
+user_cmd = st.text_input("הזן הודעה:", key="input")
+if st.button("שגר פקודה", type="primary"):
+    if user_cmd:
+        with st.spinner("הסוכן חושב..."):
+            answer = ask_gemini(user_cmd)
+            hist, sha = github_action("history.json")
+            hist.append({"time": datetime.now().strftime("%H:%M"), "user": user_cmd, "ai": answer})
+            if github_action("history.json", "PUT", hist, sha):
+                st.success("נשמר בזיכרון המאובטח!")
+                st.rerun()
 
 st.divider()
 
-# זיכרון היסטורי
-st.subheader("📜 יומן פעולות (זיכרון)")
+# היסטוריה
+st.subheader("📜 יומן פעולות")
 history, _ = github_action("history.json")
 if history:
     for entry in reversed(history):
         st.markdown(f"""
         <div class="chat-bubble">
-            <div class="user-label">👤 פקודה: {entry.get('user')}</div>
+            <div style="color:gray;">👤 פקודה: {entry.get('user')}</div>
             <div class="ai-response">🤖 {entry.get('ai')}</div>
-            <div style="font-size:0.7rem; color:#94a3b8; margin-top:10px;">🕒 {entry.get('time')}</div>
         </div>
         """, unsafe_allow_html=True)
-else:
-    st.info("הזיכרון ריק כרגע. שלח פקודה כדי להתחיל.")
