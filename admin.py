@@ -4,102 +4,101 @@ import json
 import base64
 from datetime import datetime
 
-# --- אבטחה (Secrets) ---
+# --- הגדרות ליבה ---
 try:
+    # וודא שב-Streamlit Secrets השמות הם בדיוק אלו:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-    GEMINI_API_KEY = st.secrets["GEMINI_KEY"]
-except:
-    st.error("בדוק שהגדרת Secrets ב-Streamlit!")
+    GEMINI_KEY = st.secrets["GEMINI_KEY"]
+except Exception as e:
+    st.error(f"שגיאה: מפתחות חסרים ב-Secrets! ({e})")
     st.stop()
 
-# הגדרות מערכת
 GITHUB_USER = "efi-source"
 GITHUB_REPO = "my-skills-system"
 REPO_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents"
-# כתובת API יציבה (v1)
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
-# --- פונקציות ליבה של דני ---
+# ניסיון שימוש במודל היציב ביותר למניעת 404
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
-def github_file(path, method="GET", content=None, sha=None):
+# --- פונקציות עזר של דני ---
+
+def github_action(path, method="GET", data=None, sha=None):
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     url = f"{REPO_API}/{path}"
     try:
         if method == "GET":
             r = requests.get(url, headers=headers)
             if r.status_code == 200:
-                return json.loads(base64.b64decode(r.json()['content']).decode('utf-8')), r.json()['sha']
-        else:
-            payload = {"message": f"דני מעדכן: {path}", "content": base64.b64encode(json.dumps(content, indent=4).encode()).decode(), "sha": sha}
+                content = base64.b64decode(r.json()['content']).decode('utf-8')
+                return json.loads(content), r.json()['sha']
+        elif method == "PUT":
+            payload = {"message": f"דני מעדכן את {path}", "content": base64.b64encode(json.dumps(data, indent=4).encode()).decode(), "sha": sha}
             r = requests.put(url, headers=headers, json=payload)
             return r.status_code in [200, 201]
         return [], None
     except: return [], None
 
-def dani_think(prompt):
-    # הנחיה לדני: הוא סוכן אוטונומי
-    system_prompt = f"שמך דני. אתה סוכן AI עם גישה לקבצי ה-GitHub של המערכת. פקודה נוכחית: {prompt}"
-    payload = {"contents": [{"parts": [{"text": system_prompt}]}]}
+def ask_dani(prompt):
+    # הנחיה לדני להיות סוכן שמתקן קוד ומוסיף סקילים
+    context = "שמך דני. אתה סוכן AI עם גישה לעריכת קבצי ה-GitHub של המערכת. ענה בקצרה ובעברית."
+    payload = {"contents": [{"parts": [{"text": f"{context}\n\nמשתמש: {prompt}"}]}]}
     try:
         r = requests.post(GEMINI_URL, json=payload, timeout=15)
         if r.status_code == 200:
             return r.json()['candidates'][0]['content']['parts'][0]['text']
-        return f"דני נתקל בשגיאה ({r.status_code}). בדוק את ה-API Key."
-    except: return "דני לא מצליח להתחבר לרשת."
+        return f"שגיאת חיבור (קוד {r.status_code}). וודא שה-API Key תקין ותומך במודל flash."
+    except: return "דני לא מצליח לגשת לשרת ה-AI."
 
-# --- עיצוב ממשק Pro ---
+# --- עיצוב הממשק (קוביה נגללת) ---
 st.set_page_config(page_title="Danny AI Agent", layout="centered")
-
-st.markdown(f"""
+st.markdown("""
 <style>
-    /* קוביית צ'אט נגללת */
-    .chat-box {{
-        height: 400px;
-        overflow-y: auto;
-        border: 1px solid #e0e0e0;
-        border-radius: 15px;
-        padding: 20px;
-        background: #f9f9f9;
+    .chat-box {
+        height: 500px;
+        overflow-y: scroll;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 10px;
+        background-color: #fcfcfc;
         display: flex;
         flex-direction: column;
-        margin-bottom: 20px;
-    }}
-    .user-msg {{ align-self: flex-end; background: #dcf8c6; padding: 10px; border-radius: 10px; margin: 5px; max-width: 80%; text-align: right; }}
-    .ai-msg {{ align-self: flex-start; background: white; padding: 10px; border-radius: 10px; margin: 5px; max-width: 80%; border: 1px solid #ddd; }}
+    }
+    .user-bubble { background-color: #dcf8c6; padding: 10px; border-radius: 10px; margin: 5px; align-self: flex-end; max-width: 80%; border: 1px solid #c1e1a6; }
+    .ai-bubble { background-color: #ffffff; padding: 10px; border-radius: 10px; margin: 5px; align-self: flex-start; max-width: 80%; border: 1px solid #eee; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🤖 דני - סוכן אוטונומי")
+st.title("🤖 הצ'אט של דני")
+
+# טעינת היסטוריה
+history, sha_hist = github_action("history.json")
 
 # הצגת הצ'אט בתוך קוביה
-history, _ = github_file("history.json")
-
-chat_html = '<div class="chat-box">'
+chat_container = ""
 if history:
-    for m in history:
-        chat_html += f'<div class="user-msg"><b>אתה:</b><br>{m.get("user")}</div>'
-        chat_html += f'<div class="ai-msg"><b>דני:</b><br>{m.get("ai")}</div>'
-chat_html += '</div>'
-st.markdown(chat_html, unsafe_allow_html=True)
+    for msg in history:
+        chat_container += f'<div class="user-bubble"><b>אתה:</b> {msg.get("user")}</div>'
+        chat_container += f'<div class="ai-bubble"><b>דני:</b> {msg.get("ai")}</div>'
+else:
+    chat_container = "<p style='text-align:center; color:gray;'>אין הודעות בזיכרון.</p>"
 
-# שורת שליחה למטה
-with st.form(key="chat_input", clear_on_submit=True):
-    cmd = st.text_input("דבר עם דני:", placeholder="למשל: דני, תיצור סקיל חדש של בדיקת מזג אוויר")
-    submit = st.form_submit_button("שלח לדני")
+st.markdown(f'<div class="chat-box">{chat_container}</div>', unsafe_allow_html=True)
 
-    if submit and cmd:
-        with st.spinner("דני מעבד ומתעדכן..."):
-            res = dani_think(cmd)
-            hist, sha = github_file("history.json")
-            hist.append({"time": datetime.now().strftime("%H:%M"), "user": cmd, "ai": res})
-            if github_file("history.json", "PUT", hist, sha):
-                st.rerun()
+# שורת הקלדה למטה
+with st.form(key="send_msg", clear_on_submit=True):
+    user_input = st.text_input("דבר עם דני (למשל: דני, תוסיף סקיל חדש):", key="input")
+    submit = st.form_submit_button("שלח")
 
-# --- לוח בקרה של דני ---
+    if submit and user_input:
+        with st.spinner("דני חושב..."):
+            ans = ask_dani(user_input)
+            history.append({"time": datetime.now().strftime("%H:%M"), "user": user_input, "ai": ans})
+            github_action("history.json", "PUT", history, sha_hist)
+            st.rerun()
+
+# לוח בקרה צדדי
 with st.sidebar:
-    st.header("🛠️ יכולות של דני")
-    if st.button("נקה זיכרון צ'אט"):
-        github_file("history.json", "PUT", [], _)
+    st.header("⚙️ בקרה")
+    if st.button("🗑️ נקה היסטוריה"):
+        github_action("history.json", "PUT", [], sha_hist)
         st.rerun()
-    
-    st.info("דני יכול כעת לערוך את הקבצים: admin.py, skills.json, history.json")
