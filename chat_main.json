@@ -2,5 +2,9 @@
     {
         "user": "\u05de\u05d9 \u05d0\u05ea\u05d4?",
         "ai": "\u05e9\u05d2\u05d9\u05d0\u05d4 400: \u05d5\u05d5\u05d3\u05d0 \u05e9\u05d4\u05de\u05e4\u05ea\u05d7 \u05d1-Secrets \u05ea\u05e7\u05d9\u05df \u05dc\u05dc\u05d0 \u05e8\u05d5\u05d5\u05d7\u05d9\u05dd."
+    },
+    {
+        "user": "\u05d4\u05d9\u05d9, \u05de\u05d9 \u05d0\u05ea\u05d4",
+        "ai": "\u05e9\u05d2\u05d9\u05d0\u05ea API: 400 API key not valid. Please pass a valid API key. [reason: \"API_KEY_INVALID\"\ndomain: \"googleapis.com\"\nmetadata {\n  key: \"service\"\n  value: \"generativelanguage.googleapis.com\"\n}\n, locale: \"en-US\"\nmessage: \"API key not valid. Please pass a valid API key.\"\n]"
     }
 ]
