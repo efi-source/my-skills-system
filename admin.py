@@ -5,98 +5,107 @@ import json
 import base64
 from datetime import datetime
 
-# --- אבטחה וחיבור ---
+# --- הגדרות וחיבור ---
 try:
-    # פונקציית strip() מנקה רווחים מיותרים מהקצוות אוטומטית
-    GEMINI_KEY = st.secrets["GEMINI_KEY"].strip()
-    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"].strip()
+    # מנקה רווחים וגרשיים אם השתרבבו בטעות
+    GEMINI_KEY = st.secrets["GEMINI_KEY"].strip().replace('"', '')
+    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"].strip().replace('"', '')
     
     genai.configure(api_key=GEMINI_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
 except Exception as e:
-    st.error(f"שגיאה בהגדרות: {e}")
+    st.error(f"שגיאה ב-Secrets: {e}")
     st.stop()
 
 GITHUB_USER = "efi-source"
 GITHUB_REPO = "my-skills-system"
 REPO_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents"
 
-# --- פונקציות עזר ---
-def github_get_files():
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    r = requests.get(REPO_API, headers=headers)
-    return r.json() if r.status_code == 200 else []
-
+# --- פונקציות GitHub ---
 def github_action(path, method="GET", data=None, sha=None):
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     url = f"{REPO_API}/{path}"
+    
     if method == "GET":
         r = requests.get(url, headers=headers)
         if r.status_code == 200:
             content = base64.b64decode(r.json()['content']).decode('utf-8')
             return json.loads(content), r.json()['sha']
         return [], None
-    else:
+    
+    elif method == "DELETE":
+        payload = {"message": "Delete chat", "sha": sha}
+        return requests.delete(url, headers=headers, json=payload).status_code == 200
+    
+    else: # PUT
         payload = {"message": "Update chat", "content": base64.b64encode(json.dumps(data, indent=4).encode()).decode(), "sha": sha}
         return requests.put(url, headers=headers, json=payload).status_code in [200, 201]
 
 def ask_dani(prompt):
     try:
-        # הנחיית מערכת כדי שדני ידע מי הוא
-        response = model.generate_content(f"אתה דני, סוכן AI. ענה בעברית קצרה ולעניין: {prompt}")
+        response = model.generate_content(f"אתה דני, סוכן AI עוזר. ענה בעברית: {prompt}")
         return response.text
     except Exception as e:
-        return f"שגיאת API (תבדוק את המפתח): {str(e)[:100]}"
+        return f"שגיאה (בדוק מפתח): {str(e)[:50]}"
 
-# --- עיצוב ממשק ---
-st.set_page_config(page_title="Danny AI", layout="wide")
+# --- עיצוב ---
+st.set_page_config(page_title="דני - ניהול שיחות", layout="wide")
 st.markdown("""
 <style>
-    .chat-container { height: 500px; overflow-y: auto; padding: 20px; background: #ffffff; border-radius: 15px; border: 1px solid #ddd; display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
-    .bubble { padding: 12px 16px; border-radius: 18px; max-width: 75%; font-size: 1rem; position: relative; }
-    .user { align-self: flex-end; background: #e1ffc7; border: 1px solid #b7e68d; text-align: right; }
-    .ai { align-self: flex-start; background: #f1f1f1; border: 1px solid #ddd; text-align: left; }
-    .header-tag { font-weight: bold; font-size: 0.75rem; margin-bottom: 5px; display: block; color: #555; }
+    .chat-box { height: 500px; overflow-y: auto; padding: 15px; background: #f9f9f9; border-radius: 15px; border: 1px solid #ddd; display: flex; flex-direction: column; gap: 10px; }
+    .msg { padding: 12px; border-radius: 15px; max-width: 80%; }
+    .user { align-self: flex-end; background: #e1ffc7; border: 1px solid #b7e68d; }
+    .ai { align-self: flex-start; background: white; border: 1px solid #eee; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- סרגל צד: היסטוריה וסקילים ---
+# --- סרגל צד (היסטוריה וניהול) ---
 with st.sidebar:
-    st.title("🤖 דני - ניהול")
+    st.title("🤖 דני - צ'אטים")
+    
     if st.button("➕ צ'אט חדש", use_container_width=True):
-        st.session_state.current_chat = f"chat_{datetime.now().strftime('%H%M%S')}.json"
+        st.session_state.chat_id = f"chat_{datetime.now().strftime('%d%m_%H%M%S')}.json"
         st.rerun()
-
+    
     st.divider()
-    st.subheader("📁 היסטוריית שיחות")
-    files = github_get_files()
-    chat_files = [f['name'] for f in files if f['name'].startswith("chat_") and f['name'].endswith(".json")]
-    for cf in sorted(chat_files, reverse=True):
-        if st.button(f"💬 {cf}", use_container_width=True):
-            st.session_state.current_chat = cf
+    st.subheader("📁 שיחות שמורות")
+    
+    # טעינת רשימת הקבצים
+    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+    files = requests.get(REPO_API, headers=headers).json()
+    chat_files = [f for f in files if isinstance(f, dict) and f['name'].startswith("chat_")]
+
+    for f in sorted(chat_files, key=lambda x: x['name'], reverse=True):
+        col_chat, col_del = st.columns([4, 1])
+        name = f['name'].replace(".json", "").replace("chat_", "")
+        
+        if col_chat.button(f"💬 {name}", key=f['name'], use_container_width=True):
+            st.session_state.chat_id = f['name']
+            st.rerun()
+        
+        if col_del.button("🗑️", key=f"del_{f['name']}"):
+            github_action(f['name'], "DELETE", sha=f['sha'])
             st.rerun()
 
-# --- גוף העמוד ---
-current_file = st.session_state.get("current_chat", "chat_main.json")
-st.title(f"שיחה: {current_file.replace('.json', '')}")
+# --- תוכן ראשי ---
+active_chat = st.session_state.get("chat_id", "chat_main.json")
+st.title(f"שיחה: {active_chat.replace('.json', '')}")
 
-history, sha = github_action(current_file)
+history, sha = github_action(active_chat)
 
-# הצגת הצ'אט
-st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+st.markdown('<div class="chat-box">', unsafe_allow_html=True)
 for m in history:
-    st.markdown(f'<div class="bubble user"><span class="header-tag">👤 אתה</span>{m.get("user")}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="bubble ai"><span class="header-tag">🤖 דני</span>{m.get("ai")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="msg user"><b>אתה:</b><br>{m.get("user")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="msg ai"><b>דני:</b><br>{m.get("ai")}</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-# שליחת הודעה
-def handle_send():
-    txt = st.session_state.user_input
-    if txt:
+def send():
+    p = st.session_state.inp
+    if p:
         with st.spinner("דני חושב..."):
-            ans = ask_dani(txt)
-            history.append({"user": txt, "ai": ans})
-            github_action(current_file, "PUT", history, sha)
-            st.session_state.user_input = ""
+            res = ask_dani(p)
+            history.append({"user": p, "ai": res})
+            github_action(active_chat, "PUT", history, sha)
+            st.session_state.inp = ""
 
-st.text_input("דבר עם דני...", key="user_input", on_change=handle_send)
+st.text_input("הקלד הודעה...", key="inp", on_change=send)
