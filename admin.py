@@ -3,112 +3,93 @@ import google.generativeai as genai
 import requests, json, base64
 from datetime import datetime
 
-# --- 1. ניקוי וטעינת מפתחות (חובה למניעת שגיאות 400) ---
-def get_clean_key(name):
-    # שולף מה-Secrets ומנקה רווחים או גרשיים מיותרים
-    val = st.secrets.get(name, "")
-    return str(val).strip().strip('"').strip("'")
+# --- הגדרות בסיסיות מ-Secrets ---
+# ניקוי המפתחות מרווחים מיותרים כפי שראינו בתמונות
+G_KEY = str(st.secrets.get("GEMINI_KEY", "")).strip().replace('"', '').replace("'", "")
+G_TOKEN = str(st.secrets.get("GITHUB_TOKEN", "")).strip().replace('"', '').replace("'", "")
 
-GEMINI_KEY = get_clean_key("GEMINI_KEY")
-GITHUB_TOKEN = get_clean_key("GITHUB_TOKEN")
-
-# --- 2. מנגנון בחירת מודל חכם (מתאים ל-Gemini 1.5/2.0 וכו') ---
-@st.cache_resource
-def load_ai_engine():
-    if not GEMINI_KEY: 
-        return None, "המפתח חסר ב-Secrets!"
-    
-    genai.configure(api_key=GEMINI_KEY)
-    
-    # רשימת מודלים לניסיון - מהחדש ביותר ליציב
-    # הערה: אם גוגל תשחרר את 2.5, הוא יתווסף כאן ראשון
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
-    
-    for m_name in models_to_try:
-        try:
-            m = genai.GenerativeModel(m_name)
-            m.generate_content("ping") # בדיקת תקשורת
-            return m, m_name
-        except:
-            continue
-    return None, "שגיאת תקשורת: המודלים לא מגיבים למפתח"
-
-model, active_model_name = load_ai_engine()
-
-# --- 3. הגדרות GitHub (לשמירת שיחות) ---
-REPO = "efi-source/my-skills-system"
-URL = f"https://api.github.com/repos/{REPO}/contents"
-
-def github_sync(path, method="GET", data=None, sha=None):
-    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+# --- חיבור ל-AI (Gemini 1.5 Flash) ---
+def get_ai():
     try:
-        if method == "GET":
-            r = requests.get(f"{URL}/{path}", headers=headers)
-            if r.status_code == 200:
-                content = base64.b64decode(r.json()['content']).decode('utf-8')
-                return json.loads(content), r.json()['sha']
-            return [], None
-        else: # PUT (שמירה)
-            payload = {
-                "message": "Update from Admin",
-                "content": base64.b64encode(json.dumps(data, indent=2).encode()).decode(),
-                "sha": sha
-            }
-            return requests.put(f"{URL}/{path}", headers=headers, json=payload).status_code in [200, 201]
-    except: return [], None
+        genai.configure(api_key=G_KEY)
+        # נצמד למודל ה-Flash שהוא המהיר והיציב ביותר כרגע
+        return genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        st.error(f"שגיאת חיבור ל-AI: {e}")
+        return None
 
-# --- 4. ממשק המשתמש (UI) ---
-st.set_page_config(page_title="דני - מערכת ניהול", layout="wide")
+ai_model = get_ai()
 
-# סרגל צד לסטטוס
+# --- פונקציות GitHub (לניהול הזיכרון של דני) ---
+REPO = "efi-source/my-skills-system"
+GITHUB_URL = f"https://api.github.com/repos/{REPO}/contents"
+
+def github_file_action(path, method="GET", data=None, sha=None):
+    headers = {"Authorization": f"token {G_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    if method == "GET":
+        r = requests.get(f"{GITHUB_URL}/{path}", headers=headers)
+        if r.status_code == 200:
+            content = base64.b64decode(r.json()['content']).decode('utf-8')
+            return json.loads(content), r.json()['sha']
+        return [], None
+    else: # שמירה (PUT)
+        payload = {
+            "message": "Danny Update",
+            "content": base64.b64encode(json.dumps(data).encode()).decode(),
+            "sha": sha
+        }
+        return requests.put(f"{GITHUB_URL}/{path}", headers=headers, json=payload)
+
+# --- ממשק משתמש (UI) ---
+st.set_page_config(page_title="דני AI - ניהול", layout="wide")
+
+# סרגל צד לסטטוס והיסטוריה
 with st.sidebar:
-    st.title("🤖 סטטוס דני")
-    if model:
-        st.success(f"מחובר למודל: {active_model_name}")
+    st.title("🤖 דני - שליטה")
+    if ai_model:
+        st.success("✅ המוח של דני מחובר")
     else:
-        st.error(active_model_name)
+        st.error("❌ תקלה בחיבור המוח")
     
-    if st.button("➕ צ'אט חדש", use_container_width=True):
+    if st.button("➕ שיחה חדשה"):
         st.session_state.active_chat = None
         st.rerun()
-    
+
     st.divider()
-    st.subheader("📁 שיחות שמורות")
-    # טעינת רשימת קבצים מ-GitHub
-    files_res = requests.get(URL, headers={"Authorization": f"token {GITHUB_TOKEN}"})
-    if files_res.status_code == 200:
-        for f in [x for x in files_res.json() if x['name'].startswith("chat_")]:
-            if st.button(f"💬 {f['name'][5:-5]}", key=f['name'], use_container_width=True):
-                st.session_state.active_chat = f['name']
+    st.subheader("📂 שיחות קודמות")
+    # הצגת קבצי השיחות הקיימים
+    res = requests.get(GITHUB_URL, headers={"Authorization": f"token {G_TOKEN}"})
+    if res.status_code == 200:
+        for file in [f for f in res.json() if f['name'].startswith("chat_")]:
+            if st.button(f"💬 {file['name'][5:-5]}", key=file['name']):
+                st.session_state.active_chat = file['name']
                 st.rerun()
 
-# --- 5. גוף הצ'אט ---
-st.title(f"📺 שיחה נוכחית: {st.session_state.get('active_chat', 'חדשה')}")
+# --- חלון הצ'אט המרכזי ---
+active_chat = st.session_state.get("active_chat")
+history, current_sha = github_file_action(active_chat) if active_chat else ([], None)
 
-active_file = st.session_state.get("active_chat")
-history, current_sha = github_sync(active_file) if active_file else ([], None)
+st.title(f"📺 צ'אט: {active_chat or 'חדש'}")
 
-# הצגת היסטוריה בבועות
-for m in history:
-    with st.chat_message("user"): st.write(m["u"])
-    with st.chat_message("assistant"): st.write(m["a"])
+# הצגת ההודעות (בועות)
+for msg in history:
+    with st.chat_message("user"): st.write(msg["u"])
+    with st.chat_message("assistant"): st.write(msg["a"])
 
 # קלט מהמשתמש
-if prompt := st.chat_input("דבר עם דני..."):
-    if not model:
-        st.error("לא ניתן לשלוח הודעה - ה-AI לא מחובר.")
-    else:
+if user_input := st.chat_input("דבר עם דני..."):
+    if ai_model:
         with st.spinner("דני חושב..."):
             try:
-                # יצירת תשובה
-                response = model.generate_content(prompt).text
-                history.append({"u": prompt, "a": response})
+                # יצירת התשובה מה-AI
+                ai_res = ai_model.generate_content(user_input).text
+                history.append({"u": user_input, "a": ai_res})
                 
-                # יצירת שם קובץ ושמירה לגיטהאב
-                fname = active_file or f"chat_{datetime.now().strftime('%H%M%S')}.json"
-                github_sync(fname, "PUT", history, current_sha)
+                # שמירה ל-GitHub (בדיוק כמו ב-Workflow של Pipedream)
+                filename = active_chat or f"chat_{datetime.now().strftime('%H%M%S')}.json"
+                github_file_action(filename, "PUT", history, current_sha)
                 
-                st.session_state.active_chat = fname
+                st.session_state.active_chat = filename
                 st.rerun()
             except Exception as e:
-                st.error(f"תקלה בייצור תשובה: {e}")
+                st.error(f"תקלה: {e}")
