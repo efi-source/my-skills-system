@@ -4,31 +4,31 @@ import json
 import base64
 from datetime import datetime
 
-# --- הגדרות אבטחה (משיכה מה-Secrets) ---
+# --- אבטחה וחיבורים ---
 try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     GEMINI_API_KEY = st.secrets["GEMINI_KEY"]
 except:
-    st.error("המפתחות חסרים ב-Secrets!")
+    st.error("חסרים מפתחות ב-Secrets!")
     st.stop()
 
 GITHUB_USER = "efi-source"
 GITHUB_REPO = "my-skills-system"
 REPO_API = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents"
-# תיקון נתיב ה-API של ג'מיני
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+# כתובת API מעודכנת למניעת שגיאת 404
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
 
-# --- פונקציות עזר ---
 def github_action(path, method="GET", data=None, sha=None):
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     url = f"{REPO_API}/{path}"
     try:
-        r = requests.get(url, headers=headers) if method == "GET" else None
-        if method == "GET" and r.status_code == 200:
-            content = base64.b64decode(r.json()['content']).decode('utf-8')
-            return json.loads(content), r.json()['sha']
+        if method == "GET":
+            r = requests.get(url, headers=headers)
+            if r.status_code == 200:
+                content = base64.b64decode(r.json()['content']).decode('utf-8')
+                return json.loads(content), r.json()['sha']
         elif method == "PUT":
-            payload = {"message": "Sync", "content": base64.b64encode(json.dumps(data, indent=4).encode()).decode(), "sha": sha}
+            payload = {"message": "Update", "content": base64.b64encode(json.dumps(data, indent=4).encode()).decode(), "sha": sha}
             r = requests.put(url, headers=headers, json=payload)
             return r.status_code in [200, 201]
         return [], None
@@ -36,65 +36,66 @@ def github_action(path, method="GET", data=None, sha=None):
 
 def ask_gemini(prompt):
     try:
-        # מבנה בקשה תקין לג'מיני
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         r = requests.post(GEMINI_URL, json=payload, timeout=15)
         if r.status_code == 200:
             return r.json()['candidates'][0]['content']['parts'][0]['text']
-        return f"שגיאת AI: {r.status_code}"
-    except: return "שגיאת חיבור ל-AI"
+        return f"שגיאת AI ({r.status_code})"
+    except: return "חיבור נכשל"
 
-# --- עיצוב ממשק ---
-st.set_page_config(page_title="AI Admin Pro", layout="wide")
+# --- עיצוב ממשק דמוי WhatsApp ---
+st.set_page_config(page_title="AI Chat Admin", layout="centered")
+
 st.markdown("""
 <style>
-    .stTextInput>div>div>input { background-color: #f1f5f9; }
-    .chat-card { background: white; padding: 15px; border-radius: 10px; border-right: 5px solid #3b82f6; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    .skill-box { background: #e2e8f0; padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; border: 1px solid #cbd5e1; }
-    .skill-box:hover { background: #d1d5db; }
+    /* ריכוז המסך */
+    .main .block-container { max-width: 600px; padding-top: 2rem; }
+    
+    /* בועות צ'אט */
+    .chat-container { display: flex; flex-direction: column; gap: 10px; margin-bottom: 80px; }
+    .user-bubble { align-self: flex-end; background-color: #dcf8c6; padding: 10px; border-radius: 10px 10px 0 10px; max-width: 80%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    .ai-bubble { align-self: flex-start; background-color: white; padding: 10px; border-radius: 10px 10px 10px 0; max-width: 80%; border: 1px solid #ececec; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+    .time { font-size: 0.7rem; color: #999; margin-top: 5px; text-align: left; }
+    
+    /* שורת הקלדה תחתונה */
+    .stTextInput { position: fixed; bottom: 30px; left: 0; right: 0; padding: 0 20px; z-index: 100; max-width: 600px; margin: 0 auto; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🧠 AI Master Control")
+st.title("💬 AI Master Chat")
 
-# --- חלק 1: ניהול סקילים (לוח בחירה) ---
-st.subheader("🛠️ ספרייית סקילים")
+# הצגת סקילים ככפתורי בחירה מהירה
 skills, _ = github_action("skills.json")
 if skills:
-    cols = st.columns(4)
+    st.caption("בחר סקיל להפעלה:")
+    skill_cols = st.columns(len(skills))
     for i, s in enumerate(skills):
-        with cols[i % 4]:
-            if st.button(f"⚡ {s.get('name')}", use_container_width=True, help=s.get('description')):
-                st.session_state.input = f"הפעל סקיל: {s.get('name')}"
+        if skill_cols[i].button(s.get('name')):
+            st.session_state.temp_input = f"הפעל סקיל: {s.get('name')}"
 
 st.divider()
 
-# --- חלק 2: צ'אט (פקודות) ---
-# פונקציה לניקוי הטקסט לאחר שליחה
-def send_command():
-    cmd = st.session_state.user_input
-    if cmd:
-        with st.spinner("מעבד..."):
-            ans = ask_gemini(cmd)
-            hist, sha = github_action("history.json")
-            hist.append({"time": datetime.now().strftime("%H:%M"), "user": cmd, "ai": ans})
-            github_action("history.json", "PUT", hist, sha)
-            st.session_state.user_input = "" # מנקה את התיבה
-
-st.subheader("🤖 שלח פקודה")
-st.text_input("הזן פקודה ולחץ Enter:", key="user_input", on_change=send_command)
-
-st.divider()
-
-# --- חלק 3: יומן פעולות (האחרון למטה) ---
-st.subheader("📜 יומן פעולות")
+# הצגת היסטוריית הצ'אט (מעל שורת ההקלדה)
 history, _ = github_action("history.json")
+st.markdown('<div class="chat-container">', unsafe_allow_html=True)
 if history:
-    # כאן אנחנו לא הופכים (reversed) - כדי שהחדש יהיה למטה
     for e in history:
-        st.markdown(f"""
-        <div class="chat-card">
-            <small style="color:gray;">{e.get('time')} | 👤 {e.get('user')}</small>
-            <div style="margin-top:5px;"><b>🤖:</b> {e.get('ai')}</div>
-        </div>
-        """, unsafe_allow_html=True)
+        # הודעת משתמש
+        st.markdown(f'<div class="user-bubble">{e.get("user")}<div class="time">{e.get("time")}</div></div>', unsafe_allow_html=True)
+        # הודעת AI
+        st.markdown(f'<div class="ai-bubble"><b>🤖</b> {e.get("ai")}</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# פונקציית שליחה
+def handle_send():
+    user_msg = st.session_state.chat_input
+    if user_msg:
+        with st.spinner("שולח..."):
+            ai_ans = ask_gemini(user_msg)
+            hist, sha = github_action("history.json")
+            hist.append({"time": datetime.now().strftime("%H:%M"), "user": user_msg, "ai": ai_ans})
+            github_action("history.json", "PUT", hist, sha)
+            st.session_state.chat_input = "" # ניקוי השורה
+
+# שורת הקלדה (נשארת למטה)
+st.text_input("הקלד הודעה...", key="chat_input", on_change=handle_send)
