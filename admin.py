@@ -3,103 +3,88 @@ import google.generativeai as genai
 import requests, json, base64
 from datetime import datetime
 
-# --- הגדרות וניקוי מפתחות ---
-def get_key(name):
+# --- הגדרות ---
+def get_config(name):
     return str(st.secrets.get(name, "")).strip().strip('"').strip("'")
 
-GEMINI_KEY = get_key("GEMINI_KEY")
-GITHUB_TOKEN = get_key("GITHUB_TOKEN")
+GEMINI_KEY = get_config("GEMINI_KEY")
+GITHUB_TOKEN = get_config("GITHUB_TOKEN")
 REPO = "efi-source/my-skills-system"
-BASE_URL = f"https://api.github.com/repos/{REPO}/contents"
+API_URL = f"https://api.github.com/repos/{REPO}/contents"
 
-# --- חיבור למוח (AI) ---
+# --- חיבור ל-AI (Gemini 1.5 Flash) ---
 @st.cache_resource
-def init_ai():
+def load_danny():
     if not GEMINI_KEY: return None
-    genai.configure(api_key=GEMINI_KEY)
-    # ניסיון טעינה של מודל יציב למניעת שגיאת 404
-    for m in ['gemini-1.5-flash', 'gemini-pro']:
-        try:
-            model = genai.GenerativeModel(m)
-            model.generate_content("hi")
-            return model
-        except: continue
-    return None
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        # ניסיון טעינה של המודל הכי עדכני
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        model.generate_content("test")
+        return model
+    except:
+        return None
 
-danny_brain = init_ai()
+danny = load_danny()
 
-# --- פונקציות עבודה מול GitHub ---
-def github_api(path="", method="GET", data=None, sha=None):
+# --- עבודה מול GitHub ---
+def github_call(path="", method="GET", data=None, sha=None):
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    url = f"{API_URL}/{path}"
     try:
         if method == "GET":
-            r = requests.get(f"{BASE_URL}/{path}", headers=headers)
+            r = requests.get(url, headers=headers)
             if r.status_code == 200:
-                if isinstance(r.json(), list): return r.json(), None # רשימת קבצים
+                if isinstance(r.json(), list): return r.json(), None
                 content = base64.b64decode(r.json()['content']).decode('utf-8')
                 return json.loads(content), r.json()['sha']
-            return None, None
-        else: # PUT - שמירה
-            payload = {"message": "Danny Auto Update", "content": base64.b64encode(json.dumps(data).encode()).decode(), "sha": sha}
-            return requests.put(f"{BASE_URL}/{path}", headers=headers, json=payload)
-    except: return None, None
+        else:
+            payload = {"message": "Danny Auto-Sync", "content": base64.b64encode(json.dumps(data).encode()).decode(), "sha": sha}
+            return requests.put(url, headers=headers, json=payload).status_code in [200, 201]
+    except: pass
+    return None, None
 
-# --- עיצוב הממשק ---
-st.set_page_config(page_title="Danny AI - Master", layout="wide")
+# --- ממשק ---
+st.set_page_config(page_title="Danny AI Master", layout="wide")
 
-# סרגל צד אוטומטי
 with st.sidebar:
-    st.title("🤖 דני - שליטה")
-    if danny_brain:
-        st.success("✅ המוח מחובר")
-    else:
-        st.error("❌ המוח מנותק - בדוק מפתח")
-
-    if st.button("➕ שיחה חדשה", use_container_width=True):
-        st.session_state.chat_path = None
+    st.title("🤖 סטטוס דני")
+    if danny: st.success("✅ המוח מחובר ומוכן!")
+    else: st.error("❌ המוח מנותק - בדוק מפתח ב-Secrets")
+    
+    if st.button("➕ צ'אט חדש", use_container_width=True):
+        st.session_state.active_file = None
         st.rerun()
 
     st.divider()
-    st.subheader("📂 שיחות וסקילים")
-    
-    # טעינה אוטומטית של כל הקבצים מה-Repository
-    files, _ = github_api("")
+    st.subheader("📁 שיחות וסקילים (אוטומטי)")
+    # משיכה אוטומטית של כל הקבצים
+    files, _ = github_call("")
     if files:
         for f in files:
-            name = f['name']
-            if name.startswith("chat_") or name.endswith(".json"):
-                label = f"💬 {name.replace('chat_', '').replace('.json', '')}"
-                if st.button(label, key=name, use_container_width=True):
-                    st.session_state.chat_path = name
+            if f['name'].endswith(".json"):
+                label = f"📄 {f['name'].replace('.json', '').replace('chat_', '')}"
+                if st.button(label, key=f['name'], use_container_width=True):
+                    st.session_state.active_file = f['name']
                     st.rerun()
 
-# --- חלון הצ'אט ---
-active_chat = st.session_state.get("chat_path")
-st.title(f"📺 צ'אט: {active_chat or 'חדש'}")
+# --- גוף הצ'אט ---
+active_f = st.session_state.get("active_file")
+st.title(f"📺 שיחה פעילה: {active_f or 'חדשה'}")
 
-# טעינת תוכן השיחה
-chat_data, current_sha = github_api(active_chat) if active_chat else ([], None)
-if not isinstance(chat_data, list): chat_data = []
+history, current_sha = github_call(active_f) if active_f else ([], None)
+if not isinstance(history, list): history = []
 
-# הצגת ההיסטוריה
-for msg in chat_data:
-    with st.chat_message("user"): st.write(msg["u"])
-    with st.chat_message("assistant"): st.write(msg["a"])
+for m in history:
+    with st.chat_message("user"): st.write(m["u"])
+    with st.chat_message("assistant"): st.write(m["a"])
 
-# קלט ושליחה
-if prompt := st.chat_input("דבר עם דני..."):
-    if danny_brain:
-        with st.spinner("דני כותב..."):
-            try:
-                # יצירת תשובה
-                response = danny_brain.generate_content(prompt).text
-                chat_data.append({"u": prompt, "a": response})
-                
-                # שמירה אוטומטית ל-GitHub
-                file_to_save = active_chat or f"chat_{datetime.now().strftime('%H%M%S')}.json"
-                github_api(file_to_save, "PUT", chat_data, current_sha)
-                
-                st.session_state.chat_path = file_to_save
-                st.rerun()
-            except Exception as e:
-                st.error(f"שגיאה: {e}")
+if p := st.chat_input("דבר עם דני..."):
+    if danny:
+        with st.spinner("דני חושב..."):
+            res = danny.generate_content(p).text
+            history.append({"u": p, "a": res})
+            fname = active_f or f"chat_{datetime.now().strftime('%H%M%S')}.json"
+            github_call(fname, "PUT", history, current_sha)
+            st.session_state.active_file = fname
+            st.rerun()
